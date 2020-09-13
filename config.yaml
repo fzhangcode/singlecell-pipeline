@@ -1,0 +1,10 @@
+## Important note:
+### All paths defined in this configuration file must be either absolute or relative to the 
+### location of the Snakefile!
+#
+### Reference annotation details
+###--------------------------------------------------------------------------------------------
+### Specify rawbcl folders to run
+
+rawbcl: ['190201_KW6622_10x_rawbcl', '190305_KW6725_10x_rawbcl', '190308_KW6736_10x_rawbcl', '190502_KW6937_10x_rawbcl']
+

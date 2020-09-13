@@ -1,0 +1,192 @@
+# Configuration file 1
+import os
+if len(config) == 0:
+  if os.path.isfile("./config.yaml"):
+    configfile: "./config.yaml"
+  else:
+    sys.exit("Make sure there is a config.yaml file in " + os.getcwd() + " or specify one with the --configfile commandline parameter.")
+
+## Make sure that all expected variables from the config file are in the config dictionary
+configvars = ['rawbcl']
+for k in configvars:
+        if k not in config:
+                config[k] = None
+
+## If any of the file paths is missing, replace it with ""
+def sanitizefile(str):
+        if str is None:
+                str = ''
+        return str
+
+#-------------------------------------------------------------------------------------------
+
+config['rawbcl'] = sanitizefile(config['rawbcl'])
+
+import pandas as pd
+sample_sheet = '/data/srlab/bwh10x/pipeline/Master-10Xsamplelog-RNA-SeqSamplelog.csv'
+
+
+#-------------------------------------------------------------------------------------------
+
+rule all: 
+  input: 
+    expand('{rawbcl}/output', rawbcl = config["rawbcl"])
+
+#-----------------------------------------
+
+rule mk_sample_sheet:
+  input:
+    rawbcl = expand('{rawbcl}', rawbcl = config["rawbcl"])
+  output:
+    '{rawbcl}/sample_sheet.csv'
+  run:
+    for i in input:
+      open('{}/sample_sheet.csv'.format(i), 'w').write('Lane,Sample,Index\n')
+      work_order = i.split('_')[1]
+      sample_log = pd.read_csv(sample_sheet, sep = ",", index_col = 'work order')
+      sample_log_small = sample_log.loc[[work_order]]
+      samples = sample_log_small['Library ID'].tolist()
+      i7 = sample_log_small['i7 Well'].tolist()
+      for j in range(len(samples)):
+        open('{}/sample_sheet.csv'.format(i), 'a+').write('1-4,' + samples[j] + ',SI-GA-' + i7[j] + '\n')
+
+
+#-----------------------------------------
+
+rule mkfastq_params:
+  input:
+    rawbcl = '{rawbcl}',
+    sample_sheet = '{rawbcl}/sample_sheet.csv'
+  output:
+    '{rawbcl}/lsf_params_mkfastq'
+  shell:
+    'echo {input.rawbcl} > {output}'  
+      
+#-----------------------------------------
+
+rule mkfastq:
+  input:
+    rawbcl = '{rawbcl}',
+    rawbcl_params = '{rawbcl}/lsf_params_mkfastq'
+  output:
+    directory('{rawbcl}/FASTQS')
+  shell:  
+    'module load bcl2fastq2/2.19.1; '
+    'module load casava/1.8.3; '
+    'cd /data/srlab/bwh10x/10X-Core-Pipeline/{input.rawbcl}; '
+    '/data/srlab/cellranger/cellranger-atac-1.1.0/cellranger-atac mkfastq --id=FASTQS --run=/data/srlab/bwh10x/10X-Core-Pipeline/{input.rawbcl} --csv=/data/srlab/bwh10x/10X-Core-Pipeline/{input.rawbcl}/sample_sheet.csv --jobmode=local --localcores=16 --localmem=64; '
+
+#-----------------------------------------
+rule control_count:
+  input:
+    rawbcl = expand('{rawbcl}', rawbcl = config["rawbcl"]),
+    FASTQS = directory(expand('{rawbcl}/FASTQS', rawbcl = config["rawbcl"]))
+  output:
+    expand('{rawbcl}/lsf_params_count', rawbcl = config["rawbcl"])
+  run:
+    for i in input.rawbcl:
+      work_order = i.split('_')[1]
+      sample_log = pd.read_csv(sample_sheet, sep = ",", index_col = 'work order')
+      sample_log_small = sample_log.loc[[work_order]]
+      samples = sample_log_small['Library ID'].tolist()
+      species = sample_log_small['Species'].tolist()
+      ADT = sample_log_small['ADT (cite-seq) library'].tolist()
+      HTO = sample_log_small['HTO (cell-hashing) library'].tolist()
+      TCR = sample_log_small['TCR Library'].tolist()
+      ATAC = sample_log_small[['ATAC']].tolist()
+      for j in range(len(samples)):
+        if species[j] == "Human":
+          genome = "GRCh38"
+        elif species[j] == "Mouse":
+          genome = "mm10"  
+        if ADT[j] != 'No':
+          open('{}/lsf_params_count'.format(i), 'a+').write(i + '\t' + samples[j] + '\t' + '/data/srlab/external-data/10xgenomics/refdata-cellranger-' + genome + '-3.0.0' + '\t' + 'features-' + samples[j] + '.csv' + '\t' + 'libraries-' + samples[j] + '.csv' + '\t' + 'cellranger-3.0.2' + '\t' + genome + '\t' + 'ADT' + '\n')
+        if HTO[j] != 'No':
+          open('{}/lsf_params_count'.format(i), 'a+').write(i + '\t' + samples[j] + '\t' + '/data/srlab/external-data/10xgenomics/refdata-cellranger-' + genome + '-3.0.0' + '\t' + 'features-' + samples[j] + '.csv' + '\t' + 'libraries-' + samples[j] + '.csv' + '\t' + 'cellranger-3.0.2' + '\t' + genome + '\t' + 'HTO' + '\n')
+        if TCR[j] != 'No':
+          open('{}/lsf_params_count'.format(i), 'a+').write(i + '\t' + samples[j] + '\t' + '/data/srlab/external-data/10xgenomics/refdata-cellranger-' + genome + '-3.0.0' + '\t' + 'none \t none \t' + 'cellranger-3.0.2' + '\t' + genome + '\t' + 'TCR' + '\n')
+        if ATAC[j] != 'No':
+          open('{}/lsf_params_count'.format(i), 'a+').write(i + '\t' + samples[j] + '\t' + '/data/srlab/external-data/10xgenomics/refdata-cellranger-atac' + genome + '-3.0.0' + '\t' + 'features-' + samples[j] + '.csv' + '\t' + 'libraries-' + samples[j] + '.csv' + '\t' + 'cellranger-3.0.2' + '\t' + genome + '\t' + 'HTO' + '\n')
+        else:
+          open('{}/lsf_params_count'.format(i), 'a+').write(i + '\t' + samples[j] + '\t' + '/data/srlab/external-data/10xgenomics/refdata-cellranger-' + genome + '-3.0.0' + '\t' + 'none \t none \t' + 'cellranger-3.0.2' + '\t' + genome + '\t' + 'mRNA' + '\n')
+
+#-----------------------------------------
+
+rule collate_params:
+  input:
+    params = expand('{rawbcl}/lsf_params_count', rawbcl = config["rawbcl"])
+  output:
+    'lsf_params_count'
+  shell:
+   'cat {input.params} > lsf_params_count'
+
+##-----------------------------------------
+
+rule prep_runs:
+  input:
+    params = 'lsf_params_count',
+    rawbcl = expand('{rawbcl}', rawbcl = config["rawbcl"])
+  output:
+    'done.txt'
+  shell:
+    'for i in {input.rawbcl}; do \n'
+      'echo $i \n'
+      'if [ ! -d "$i/output" ]; then \n'
+      'mkdir "$i/output" \n'
+      'fi \n'
+      'if [ ! -d "$i/output/cellranger-3.0.2" ]; then \n'
+      'mkdir "$i/output/cellranger-3.0.2" \n'
+      'fi \n'
+      'if [ ! -d "$i/output/cellranger-3.0.2/GRCh38" ]; then \n'
+      'mkdir $i/output/cellranger-3.0.2/GRCh38 \n'
+      'fi \n'
+      'if [ ! -d "$i/output/cellranger-3.0.2/hg19" ]; then \n'
+      'mkdir $i/output/cellranger-3.0.2/hg19 \n'
+      'fi \n'
+      'if [ ! -d "$i/output/cellranger-3.0.2/mm10" ]; then \n'
+      'mkdir $i/output/cellranger-3.0.2/mm10 \n'
+      'fi \n'
+    'done \n'
+    'touch done.txt'
+
+#-----------------------------------------
+
+rule run_count:
+  input:
+    'lsf_params_count',
+    'done.txt',
+    rawbcl = '{rawbcl}'
+  output:
+    '{rawbcl}/output'
+  shell:
+    'cat {input.rawbcl}/lsf_params_count | while read library sample transcriptome features libraries version genome type \n'
+    'do \n'
+    'echo $library \n'
+    'echo $type \n'
+    'if [ "$type" == "ADT" ]; then \n'
+      'echo ADT \n'
+      'echo "/data/srlab/bwh10x/10X-Core-Pipeline/$library/output/$version/$genome" \n'
+      'cd /data/srlab/bwh10x/10X-Core-Pipeline/$library/output/$version/$genome \n'
+      '/data/srlab/cellranger/cellranger-3.0.2/cellranger count --id=$sample --libraries=/data/srlab/bwh10x/$library/$libraries --feature-ref=/data/srlab/bwh10x/$library/$features --transcriptome=$transcriptome --jobmode=local --localcores=8 --localmem=32 \n'
+    'fi \n'
+    'if [ "$type" == "HTO" ]; then \n'
+      'echo HTO \n'
+      'cd /data/srlab/bwh10x/10X-Core-Pipeline/$library/output/$version/$genome \n'
+      '/data/srlab/cellranger/cellranger-3.0.2/cellranger count --id=$sample --libraries=/data/srlab/bwh10x/$library/$libraries --feature-ref=/data/srlab/bwh10x/$library/$features --transcriptome=$transcriptome --jobmode=local --localcores=8 --localmem=32 \n'
+    'fi \n'
+    'if [ "$type" == "TCR" ]; then \n'
+      'echo TCR \n'
+      'cd /data/srlab/bwh10x/10X-Core-Pipeline/$library/output/$version/$genome \n'
+      '/data/srlab/cellranger/cellranger-3.0.2/cellranger vdj --id=$sample --fastqs=/data/srlab/bwh10x/$library/FASTQS --sample=$sample --reference=$transcriptome --jobmode=local --localcores=8 --localmem=32 \n'
+    'fi \n'
+    'if [ "$type" == "mRNA" ]; then \n'
+      'echo mRNA \n'
+      'cd /data/srlab/bwh10x/10X-Core-Pipeline/$library/output/$version/$genome \n'
+      '/data/srlab/cellranger/cellranger-3.0.2/cellranger count --id=$sample --fastqs=/data/srlab/bwh10x/$library/FASTQS --sample=$sample --transcriptome=$transcriptome --jobmode=local --localcores=8 --localmem=32 \n'
+    'fi \n'
+    'if [ "$type" == "ATAC" ]; then \n'
+      'echo ATAC \n'
+      'cd /data/srlab/bwh10x/10X-Core-Pipeline/$library/output/$version/$genome \n'
+      '/data/srlab/cellranger/cellranger-3.0.2/cellranger-atac count --id=$sample --fastqs=/data/srlab/bwh10x/$library/FASTQS --sample=$sample --transcriptome=$transcriptome --jobmode=local --localcores=8 --localmem=32 \n'
+    'fi \n'
+    'done \n'
