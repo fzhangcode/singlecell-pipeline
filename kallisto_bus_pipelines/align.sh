@@ -1,0 +1,1 @@
+/PHShome/jn467/miniconda3/bin/kallisto bus --index=reference/GRCh38_Kallisto-index_5-13-20 --output-dir=test --technology=CELSeq2 /data/srlab1/jmears/Inflamed_Integration/AMP_RA/S006/S006_L1Q1_und_R1.fastq.gz /data/srlab1/jmears/Inflamed_Integration/AMP_RA/S006/S006_L1Q1_und_R2.fastq.gz 

@@ -1,0 +1,1 @@
+snakemake --jobs=4
